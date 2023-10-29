@@ -1,0 +1,108 @@
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+  labels:
+    app: myapp
+spec:
+  replicas: 4 # количество подов
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      containers:
+        - name: myapp
+          image: local/app:pitermar
+          resources:
+            requests:
+              cpu: "0.2" # определяем необходимые ресурсы CPU начального запроса
+              memory: "128Mi" # определяем необходимые ресурсы памяти
+            limits:
+              cpu: "0.5" # определяем максимально допустимое потребление CPU
+              memory: "256Mi" # определяем максимально допустимое потребление памяти
+          livenessProbe:
+            httpGet:
+              path: /health # путь для проверки приложения на работоспособность
+              port: 8000 # порт для проверки
+            initialDelaySeconds: 60 # время для ожидания инициализации приложения
+            periodSeconds: 10 # период проверки готовности к обработке запросов
+          readinessProbe:
+            httpGet:
+              path: /ready # путь для проверки готовности приложения к обработке запросов
+              port: 8000 # порт для проверки
+            initialDelaySeconds: 60 # время для ожидания инициализации приложения
+            periodSeconds: 10 # период проверки готовности к обработке запросов
+    nodeSelector: # выбор узлов на которых будут запущены поды (актуально для Google Cloud Platform)
+        failure-domain.beta.kubernetes.io/zone: us-central1-a, us-central1-b, us-central1-c
+
+      #nodeSelector: # актуально для мультизонального кластера запущенного на трех настроенных машинах (hostnames = zone1, zone2, zone3)
+        #kubernetes.io/hostname: zone1 # выбираем узел, на котором должен запускаться под
+
+      #affinity: # задание аффинити для размещения подов в разных зонах
+          #zone:
+            #terms:
+            #- matchExpressions:
+              #- key: topology.kubernetes.io/zone
+                #operator: In
+                #values:
+                #- zone1
+                #- zone2
+                #- zone3
+
+      #strategy:
+          #type: RollingUpdate # тип обновления, который обеспечивает максимально отказоустойчивый deployment
+          #rollingUpdate:
+            #maxUnavailable: 1 # максимальное количество недоступных подов во время обновления
+            #maxSurge: 1 # максимальное количество добавляемых подов во время обновления
+
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: myapp-autoscaling
+  labels:
+    app: myapp
+spec:
+  maxReplicas: 8 # максимальное количество подов, которое может быть запущено
+  minReplicas: 2 # минимальное количество подов, которое должно быть запущено
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75 # желаемая средняя загрузка CPU
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80 # желаемая средняя загрузка memory
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: myapp
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp
+  namespace: default
+spec:
+  selector:
+    app: myapp
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP # тип сервиса
+  sessionAffinity: ClientIP # механизм балансировки нагрузки
